@@ -39,9 +39,6 @@ class CreateIntroducerOptions(BasedirOptions):
 client_tac = """
 # -*- python -*-
 
-import pkg_resources
-pkg_resources.require('%s')
-pkg_resources.require('twisted')
 from allmydata import client
 from twisted.application import service
 
@@ -49,14 +46,11 @@ c = client.Client()
 
 application = service.Application("allmydata_client")
 c.setServiceParent(application)
-""" % (allmydata.__appname__,)
+"""
 
 introducer_tac = """
 # -*- python -*-
 
-import pkg_resources
-pkg_resources.require('%s')
-pkg_resources.require('twisted')
 from allmydata import introducer
 from twisted.application import service
 
@@ -64,7 +58,7 @@ c = introducer.IntroducerNode()
 
 application = service.Application("allmydata_introducer")
 c.setServiceParent(application)
-""" % (allmydata.__appname__,)
+"""
 
 def write_node_config(c, config):
     # this is shared between clients and introducers
