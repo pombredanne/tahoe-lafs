@@ -3793,7 +3793,7 @@ class Options(unittest.TestCase):
         o = self.parse(["start"])
         self.failUnlessEqual(o["basedir"], os.path.join(os.path.expanduser("~"),
                                                         ".tahoe"))
-        o = self.parse(["start", "here"]) # XXX fails
+        o = self.parse(["start", "here"])
         self.failUnlessEqual(o["basedir"], os.path.abspath("here"))
         o = self.parse(["start", "--basedir", "there"])
         self.failUnlessEqual(o["basedir"], os.path.abspath("there"))
