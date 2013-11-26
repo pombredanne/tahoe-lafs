@@ -1,6 +1,4 @@
-﻿
-
-.. -*- coding: utf-8 -*-
+﻿.. -*- coding: utf-8-with-signature -*-
 
 Welcome to Tahoe-LAFS!
 ======================
@@ -22,7 +20,7 @@ misconfigurations, or operator error can accidentally expose your data to
 another customer or to the public, or can corrupt your data.  Criminals
 routinely gain illicit access to corporate servers.  Even more insidious is
 the fact that the employees themselves sometimes violate customer privacy out
-of carelessness, avarice, or mere curiousity.  The most conscientious of
+of carelessness, avarice, or mere curiosity.  The most conscientious of
 these service providers spend considerable effort and expense trying to
 mitigate these risks.
 
