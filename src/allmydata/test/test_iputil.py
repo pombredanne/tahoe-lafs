@@ -5,10 +5,8 @@ from twisted.trial import unittest
 
 from allmydata.util import iputil
 import allmydata.test.common_util as testutil
+from allmydata.util.namespace import Namespace
 
-
-class Namespace:
-    pass
 
 DOTTED_QUAD_RE=re.compile("^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$")
 
@@ -130,6 +128,7 @@ class ListAddresses(testutil.SignalMixin, unittest.TestCase):
                 e.errno = errno.ENOENT
                 raise e
         self.patch(subprocess, 'Popen', call_Popen)
+        self.patch(os.path, 'isfile', lambda x: True)
 
         def call_get_local_ip_for(target):
             if target in ("localhost", "127.0.0.1"):

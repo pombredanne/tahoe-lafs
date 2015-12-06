@@ -16,7 +16,7 @@ from allmydata.immutable.filenode import ImmutableFileNode
 from allmydata.util import idlib, mathutil
 from allmydata.util import log, base32
 from allmydata.util.verlib import NormalizedVersion
-from allmydata.util.encodingutil import quote_output, unicode_to_argv, get_filesystem_encoding
+from allmydata.util.encodingutil import quote_output, unicode_to_argv
 from allmydata.util.fileutil import abspath_expanduser_unicode
 from allmydata.util.consumer import MemoryConsumer, download_to_data
 from allmydata.scripts import runner
@@ -102,7 +102,7 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
         d = self.set_up_nodes()
         def _check_connections(res):
             for c in self.clients:
-                c.DEFAULT_ENCODING_PARAMETERS['happy'] = 5
+                c.encoding_params['happy'] = 5
                 all_peerids = c.get_storage_broker().get_all_serverids()
                 self.failUnlessEqual(len(all_peerids), self.numclients)
                 sb = c.storage_broker
@@ -214,7 +214,7 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
                                                       add_to_sparent=True))
         def _added(extra_node):
             self.extra_node = extra_node
-            self.extra_node.DEFAULT_ENCODING_PARAMETERS['happy'] = 5
+            self.extra_node.encoding_params['happy'] = 5
         d.addCallback(_added)
 
         def _has_helper():
@@ -724,7 +724,7 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
         d = self.set_up_nodes(use_stats_gatherer=True)
         def _new_happy_semantics(ign):
             for c in self.clients:
-                c.DEFAULT_ENCODING_PARAMETERS['happy'] = 1
+                c.encoding_params['happy'] = 1
         d.addCallback(_new_happy_semantics)
         d.addCallback(self._test_introweb)
         d.addCallback(self.log, "starting publish")
@@ -812,8 +812,6 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
                                      {"storage": 5})
                 self.failUnlessEqual(data["announcement_summary"],
                                      {"storage": 5})
-                self.failUnlessEqual(data["announcement_distinct_hosts"],
-                                     {"storage": 1})
             except unittest.FailTest:
                 print
                 print "GET %s?t=json output was:" % self.introweb_url
@@ -1114,7 +1112,7 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
         d.addCallback(lambda res: getPage(self.helper_webish_url))
         def _got_welcome_helper(page):
             html = page.replace('\n', ' ')
-            self.failUnless(re.search(r'<div class="status-indicator connected-yes"></div>\s*<div>Helper</div>', html), page)
+            self.failUnless(re.search('<img src="img/connected-yes.png" alt="Connected" />', html), page)
             self.failUnlessIn("Not running helper", page)
         d.addCallback(_got_welcome_helper)
 
@@ -1171,7 +1169,7 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
         def _new_happy_semantics(ign):
             for c in self.clients:
                 # these get reset somewhere? Whatever.
-                c.DEFAULT_ENCODING_PARAMETERS['happy'] = 1
+                c.encoding_params['happy'] = 1
         d.addCallback(_new_happy_semantics)
         d.addCallback(lambda res: self.PUT(public + "/subdir3/big.txt",
                                            "big" * 500000)) # 1.5MB
@@ -1399,18 +1397,7 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
         d.addCallback(self._test_control2, control_furl_file)
         return d
     def _test_control2(self, rref, filename):
-        d = rref.callRemote("upload_from_file_to_uri",
-                            filename.encode(get_filesystem_encoding()), convergence=None)
-        downfile = os.path.join(self.basedir, "control.downfile").encode(get_filesystem_encoding())
-        d.addCallback(lambda uri:
-                      rref.callRemote("download_from_uri_to_file",
-                                      uri, downfile))
-        def _check(res):
-            self.failUnlessEqual(res, downfile)
-            data = open(downfile, "r").read()
-            expected_data = open(filename, "r").read()
-            self.failUnlessEqual(data, expected_data)
-        d.addCallback(_check)
+        d = defer.succeed(None)
         d.addCallback(lambda res: rref.callRemote("speed_test", 1, 200, False))
         if sys.platform in ("linux2", "linux3"):
             d.addCallback(lambda res: rref.callRemote("get_memory_usage"))
@@ -1685,7 +1672,7 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
         open(os.path.join(sdn2, "rfile5"), "wb").write("rfile5")
 
         # from disk into tahoe
-        d.addCallback(run, "cp", "-r", dn, "tahoe:dir1")
+        d.addCallback(run, "cp", "-r", dn, "tahoe:")
         d.addCallback(run, "ls")
         d.addCallback(_check_ls, ["dir1"])
         d.addCallback(run, "ls", "dir1")
@@ -1703,7 +1690,7 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
         def _check_cp_r_out((out,err)):
             def _cmp(name):
                 old = open(os.path.join(dn, name), "rb").read()
-                newfn = os.path.join(dn_copy, name)
+                newfn = os.path.join(dn_copy, "dir1", name)
                 self.failUnless(os.path.exists(newfn))
                 new = open(newfn, "rb").read()
                 self.failUnlessEqual(old, new)
@@ -1722,7 +1709,7 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
         d.addCallback(run, "cp", "-r", "--caps-only", "tahoe:dir1", dn_copy2)
         def _check_capsonly((out,err)):
             # these should all be LITs
-            x = open(os.path.join(dn_copy2, "subdir2", "rfile4")).read()
+            x = open(os.path.join(dn_copy2, "dir1", "subdir2", "rfile4")).read()
             y = uri.from_string_filenode(x)
             self.failUnlessEqual(y.data, "rfile4")
         d.addCallback(_check_capsonly)
@@ -1731,13 +1718,13 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
         d.addCallback(run, "cp", "-r", "tahoe:dir1", "tahoe:dir1-copy")
         d.addCallback(run, "ls")
         d.addCallback(_check_ls, ["dir1", "dir1-copy"])
-        d.addCallback(run, "ls", "dir1-copy")
+        d.addCallback(run, "ls", "dir1-copy/dir1")
         d.addCallback(_check_ls, ["rfile1", "rfile2", "rfile3", "subdir2"],
                       ["rfile4", "rfile5"])
-        d.addCallback(run, "ls", "tahoe:dir1-copy/subdir2")
+        d.addCallback(run, "ls", "tahoe:dir1-copy/dir1/subdir2")
         d.addCallback(_check_ls, ["rfile4", "rfile5"],
                       ["rfile1", "rfile2", "rfile3"])
-        d.addCallback(run, "get", "dir1-copy/subdir2/rfile4")
+        d.addCallback(run, "get", "dir1-copy/dir1/subdir2/rfile4")
         d.addCallback(_check_stdout_against, data="rfile4")
 
         # and copy it a second time, which ought to overwrite the same files
@@ -1764,7 +1751,7 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
         d = self.set_up_nodes()
         def _new_happy_semantics(ign):
             for c in self.clients:
-                c.DEFAULT_ENCODING_PARAMETERS['happy'] = 1
+                c.encoding_params['happy'] = 1
         d.addCallback(_new_happy_semantics)
 
         def _run_in_subprocess(ignored, verb, *args, **kwargs):

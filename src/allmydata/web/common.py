@@ -18,6 +18,22 @@ from allmydata.util.encodingutil import to_str, quote_output
 
 TIME_FORMAT = "%H:%M:%S %d-%b-%Y"
 
+def get_filenode_metadata(filenode):
+    metadata = {'mutable': filenode.is_mutable()}
+    if metadata['mutable']:
+        mutable_type = filenode.get_version()
+        assert mutable_type in (SDMF_VERSION, MDMF_VERSION)
+        if mutable_type == MDMF_VERSION:
+            file_format = "MDMF"
+        else:
+            file_format = "SDMF"
+    else:
+        file_format = "CHK"
+    metadata['format'] = file_format
+    size = filenode.get_size()
+    if size is not None:
+        metadata['size'] = size
+    return metadata
 
 class IOpHandleTable(Interface):
     pass
@@ -190,7 +206,7 @@ def plural(sequence_or_length):
 def text_plain(text, ctx):
     req = IRequest(ctx)
     req.setHeader("content-type", "text/plain")
-    req.setHeader("content-length", len(text))
+    req.setHeader("content-length", b"%d" % len(text))
     return text
 
 class WebError(Exception):
@@ -299,7 +315,7 @@ class MyExceptionHandler(appserver.DefaultExceptionHandler):
         req.setHeader("content-type", "text/plain;charset=utf-8")
         if isinstance(text, unicode):
             text = text.encode("utf-8")
-        req.setHeader("content-length", str(len(text)))
+        req.setHeader("content-length", b"%d" % len(text))
         req.write(text)
         # TODO: consider putting the requested URL here
         req.finishRequest(False)

@@ -44,8 +44,13 @@ Here's how it works:
 
 A "storage grid" is made up of a number of storage servers.  A storage server
 has direct attached storage (typically one or more hard disks).  A "gateway"
-uses the storage servers and provides access to the filesystem over HTTP(S)
-or (S)FTP.
+communicates with storage nodes, and uses them to provide access to the
+file store over protocols such as HTTP(S), SFTP or FTP.
+
+Note that you can find "client" used to refer to gateway nodes (which act as
+a client to storage servers), and also to processes or programs connecting to
+a gateway node and performing operations on the grid -- for example, a CLI
+command, Web browser, SFTP client, or FTP client.
 
 Users do not rely on storage servers to provide *confidentiality* nor
 *integrity* for their data -- instead all of the data is encrypted and
@@ -67,7 +72,7 @@ An alternate deployment mode is that the gateway runs on a remote machine and
 the user connects to it over HTTPS or SFTP.  This means that the operator of
 the gateway can view and modify the user's data (the user *relies on* the
 gateway for confidentiality and integrity), but the advantage is that the
-user can access the filesystem with a client that doesn't have the gateway
+user can access the file store with a client that doesn't have the gateway
 software installed, such as an Internet kiosk or cell phone.
 
 Access Control
@@ -107,22 +112,6 @@ To use Tahoe-LAFS, please see quickstart.rst_.
 License
 =======
 
-Copyright 2006-2012 The Tahoe-LAFS Software Foundation
+Tahoe-LAFS is an open-source project; please see README.rst_ for details.
 
-You may use this package under the GNU General Public License, version 2 or,
-at your option, any later version.  See the file COPYING.GPL_ for the terms
-of the GNU General Public License, version 2.
-
-You may use this package under the Transitive Grace Period Public Licence,
-version 1 or, at your option, any later version.  The Transitive Grace Period
-Public Licence has requirements similar to the GPL except that it allows you
-to wait for up to twelve months after you redistribute a derived work before
-releasing the source code of your derived work. See the file
-COPYING.TGPPL.rst_ for the terms of the Transitive Grace Period Public
-Licence, version 1.
-
-(You may choose to use this package under the terms of either licence, at
-your option.)
-
-.. _COPYING.GPL: ../COPYING.GPL
-.. _COPYING.TGPPL.rst: ../COPYING.TGPPL.rst
+.. _README.rst: ../README.rst

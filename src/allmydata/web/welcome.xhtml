@@ -59,6 +59,7 @@
                   Filename
                   <input type="text" name="filename" />
                 </label>
+                <input type="hidden" name="save" value="true"/>
                 <p><input type="submit" class="btn" value="Download File &#187;" /></p>
               </form>
             </div>
@@ -77,12 +78,12 @@
 
                 <label for="upload-sdmf" class="radio">
                   <input type="radio" id="upload-sdmf" value="sdmf" name="format" />
-                  SDMF
+                  <acronym title="Small Distributed Mutable File">SDMF</acronym>
                 </label>
 
                 <label for="upload-mdmf" class="radio">
                   <input type="radio" id="upload-mdmf" value="mdmf" name="format" />
-                  MDMF (experimental)
+                  <acronym title="Medium Distributed Mutable File">MDMF</acronym> (experimental)
                 </label>
 
                 <p><input type="submit" class="btn" value="Upload File &#187;" /></p>
@@ -95,12 +96,12 @@
               <form action="uri" method="post" enctype="multipart/form-data">
                 <label for="mkdir-sdmf" class="radio"> 
                   <input type="radio" checked="checked" id="mkdir-sdmf" value="sdmf" name="format" />
-                  SDMF
+                  <acronym title="Small Distributed Mutable File">SDMF</acronym>
                 </label>
 
                 <label for="mkdir-mdmf" class="radio">
                   <input type="radio" id="mkdir-mdmf" value="mdmf" name="format" />
-                  MDMF (experimental)
+                  <acronym title="Medium Distributed Mutable File">MDMF</acronym> (experimental)
                 </label>
 
                 <input type="hidden" name="t" value="mkdir" />
@@ -136,14 +137,14 @@
               <div class="span6">
                 <div>
                   <h3>
-                    <div><n:attr name="class">status-indicator connected-<n:invisible n:render="string" n:data="connected_to_introducer" /></n:attr></div>
+                    <div class="status-indicator"><img><n:attr name="src">img/connected-<n:invisible n:render="string" n:data="connected_to_introducer" />.png</n:attr><n:attr name="alt"><n:invisible n:render="string" n:data="connected_to_introducer_alt" /></n:attr></img></div>
                     <div n:render="string" n:data="introducer_description" />
                   </h3>
                   <div class="furl" n:render="string" n:data="introducer_furl_prefix" />
                 </div>
                 <div>
                   <h3>
-                    <div><n:attr name="class">status-indicator connected-<n:invisible n:render="string" n:data="connected_to_helper" /></n:attr></div>
+                    <div class="status-indicator"><img><n:attr name="src">img/connected-<n:invisible n:render="string" n:data="connected_to_helper" />.png</n:attr><n:attr name="alt"><n:invisible n:render="string" n:data="connected_to_helper_alt" /></n:attr></img></div>
                     <div n:render="string" n:data="helper_description" />
                   </h3>
                   <div class="furl" n:render="string" n:data="helper_furl_prefix" />
@@ -172,11 +173,12 @@
                 <td><h3>Since</h3></td>
                 <td><h3>Announced</h3></td>
                 <td><h3>Version</h3></td>
+                <td><h3>Available</h3></td>
               </tr>
             </thead>
             <tr n:pattern="item" n:render="service_row">
               <td class="nickname-and-peerid">
-              <div><n:attr name="class">status-indicator connected-<n:slot name="connected"/></n:attr></div>
+              <div class="status-indicator"><img><n:attr name="src">img/connected-<n:slot name="connected" />.png</n:attr><n:attr name="alt"><n:slot name="connected_alt" /></n:attr></img></div>
                 <div class="nickname"><n:slot name="nickname"/></div>
                 <div class="nodeid"><n:slot name="peerid"/></div>
               </td>
@@ -185,6 +187,7 @@
               <td class="service-since timestamp"><n:slot name="since"/></td>
               <td class="service-announced timestamp"><n:slot name="announced"/></td>
               <td class="service-version"><n:slot name="version"/></td>
+              <td class="service-available-space"><n:slot name="available_space"/></td>
             </tr>
             <tr n:pattern="empty"><td>You are not presently connected to any peers</td></tr>
           </table>

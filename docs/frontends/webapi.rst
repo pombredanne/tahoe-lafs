@@ -350,6 +350,14 @@ Reading a File
  This will retrieve the contents of the given file. The HTTP response body
  will contain the sequence of bytes that make up the file.
 
+ The "Range:" header can be used to restrict which portions of the file are
+ returned (see RFC 2616 section 14.35.1 "Byte Ranges"), however Tahoe only
+ supports a single "bytes" range and never provides a `multipart/byteranges`
+ response. An attempt to begin a read past the end of the file will provoke a
+ 416 Requested Range Not Satisfiable error, but normal overruns (reads which
+ start at the beginning or middle and go beyond the end) are simply
+ truncated.
+
  To view files in a web browser, you may want more control over the
  Content-Type and Content-Disposition headers. Please see the next section
  "Browser Operations", for details on how to modify these URLs for that
@@ -1415,6 +1423,8 @@ mainly intended for developers.
            this dictionary has only the 'healthy' key, which will always be
            True. For distributed files, this dictionary has the following
            keys:
+    count-happiness: the servers-of-happiness level of the file, as
+                     defined in `docs/specifications/servers-of-happiness.rst`_.
     count-shares-good: the number of good shares that were found
     count-shares-needed: 'k', the number of shares required for recovery
     count-shares-expected: 'N', the number of total shares generated
@@ -1438,12 +1448,6 @@ mainly intended for developers.
     list-corrupt-shares: a list of "share locators", one for each share
                          that was found to be corrupt. Each share locator
                          is a list of (serverid, storage_index, sharenum).
-    needs-rebalancing: (bool) This field is intended to be True iff
-                       reliability could be improved for this file by
-                       rebalancing, i.e. by moving some shares to other
-                       servers. It may be incorrect in some cases for
-                       Tahoe-LAFS up to and including v1.10, and its
-                       precise definition is expected to change.
     servers-responding: list of base32-encoded storage server identifiers,
                         one for each server which responded to the share
                         query.
@@ -1465,6 +1469,12 @@ mainly intended for developers.
               immutable files, it is a string of the form
               'seq%d-%s-sh%d', containing the sequence number, the
               roothash, and the share number.
+
+Before Tahoe-LAFS v1.11, the `results` dictionary also had a `needs-rebalancing`
+field, but that has been removed since it was computed incorrectly.
+
+.. _`docs/specifications/servers-of-happiness.rst`: ../specifications/servers-of-happiness.rst
+
 
 ``POST $URL?t=start-deep-check``    (must add &ophandle=XYZ)
 

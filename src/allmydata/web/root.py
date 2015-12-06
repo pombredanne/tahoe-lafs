@@ -132,6 +132,12 @@ class Root(rend.Page):
     addSlash = True
     docFactory = getxmlfile("welcome.xhtml")
 
+    _connectedalts = {
+        "not-configured": "Not Configured",
+        "yes": "Connected",
+        "no": "Disconnected",
+        }
+
     def __init__(self, client, clock=None):
         rend.Page.__init__(self, client)
         self.client = client
@@ -222,6 +228,9 @@ class Root(rend.Page):
             return "yes"
         return "no"
 
+    def data_connected_to_introducer_alt(self, ctx, data):
+        return self._connectedalts[self.data_connected_to_introducer(ctx, data)]
+
     def data_helper_furl_prefix(self, ctx, data):
         try:
             uploader = self.client.getServiceNamed("uploader")
@@ -251,6 +260,9 @@ class Root(rend.Page):
         if connected:
             return "yes"
         return "no"
+
+    def data_connected_to_helper_alt(self, ctx, data):
+        return self._connectedalts[self.data_connected_to_helper(ctx, data)]
 
     def data_known_storage_servers(self, ctx, data):
         sb = self.client.get_storage_broker()
@@ -288,9 +300,14 @@ class Root(rend.Page):
         announcement = server.get_announcement()
         version = announcement["my-version"]
         service_name = announcement["service-name"]
-
+        available_space = server.get_available_space()
+        if available_space is None:
+            available_space = "N/A"
+        else:
+            available_space = abbreviate_size(available_space)
         ctx.fillSlots("address", addr)
         ctx.fillSlots("connected", connected)
+        ctx.fillSlots("connected_alt", self._connectedalts[connected])
         ctx.fillSlots("connected-bool", bool(rhost))
         ctx.fillSlots("since", time.strftime(TIME_FORMAT,
                                              time.localtime(since)))
@@ -298,6 +315,7 @@ class Root(rend.Page):
                                                  time.localtime(announced)))
         ctx.fillSlots("version", version)
         ctx.fillSlots("service_name", service_name)
+        ctx.fillSlots("available_space", available_space)
 
         return ctx.tag
 
