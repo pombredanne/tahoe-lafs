@@ -49,19 +49,27 @@ The item descriptions below use the following types:
     not specified, Tahoe-LAFS will attempt to bind the port specified on all
     interfaces.
 
+``endpoint specification string``
+
+    a Twisted Endpoint specification string, like "``tcp:80``" or
+    "``tcp:3456:interface=127.0.0.1``". These are replacing strports strings.
+    For a full description of the format, see `the Twisted Endpoints
+    documentation`_. Please note, if interface= is not specified, Tahoe-LAFS
+    will attempt to bind the port specified on all interfaces. Also note that
+    ``tub.port`` only works with TCP endpoints right now.
+
 ``FURL string``
 
     a Foolscap endpoint identifier, like
     ``pb://soklj4y7eok5c3xkmjeqpw@192.168.69.247:44801/eqpwqtzm``
 
 .. _the Twisted strports documentation: https://twistedmatrix.com/documents/current/api/twisted.application.strports.html
-
+.. _the Twisted Endpoints documentation: http://twistedmatrix.com/documents/current/core/howto/endpoints.html#endpoint-types-included-with-twisted
 
 Node Types
 ==========
 
-A node can be a client/server, an introducer, a statistics gatherer, or a
-key generator.
+A node can be a client/server, an introducer, or a statistics gatherer.
 
 Client/server nodes provide one or more of the following services:
 
@@ -104,7 +112,7 @@ set the ``tub.location`` option described below.
 
     This controls where the node's web server should listen, providing node
     status and, if the node is a client/server, providing web-API service as
-    defined in webapi.rst_.
+    defined in :doc:`frontends/webapi`.
 
     This file contains a Twisted "strports" specification such as "``3456``"
     or "``tcp:3456:interface=127.0.0.1``". The "``tahoe create-node``" or
@@ -128,71 +136,96 @@ set the ``tub.location`` option described below.
     ``http://127.0.0.1:3456/static/foo.html`` will serve the contents of
     ``BASEDIR/public_html/foo.html`` .
 
-``tub.port = (integer, optional)``
+``tub.port = (endpoint specification string, optional)``
 
     This controls which port the node uses to accept Foolscap connections
-    from other nodes. If not provided, the node will ask the kernel for any
-    available port. The port will be written to a separate file (named
-    ``client.port`` or ``introducer.port``), so that subsequent runs will
-    re-use the same port.
+    from other nodes. It is parsed as a Twisted "server endpoint descriptor",
+    which accepts values like ``tcp:12345`` and
+    ``tcp:23456:interface=127.0.0.1``.
+
+    For backwards compatibility, if this contains a simple integer, it will
+    be used as a TCP port number, like ``tcp:%d`` (which will accept
+    connections on all interfaces). However ``tub.port`` cannot be ``0`` or
+    ``tcp:0`` (older versions accepted this, but the node is no longer
+    willing to ask Twisted to allocate port numbers in this way). To
+    automatically allocate a TCP port, leave ``tub.port`` blank.
+
+    If the ``tub.port`` config key is not provided, the node will look in
+    ``BASEDIR/client.port`` (or ``BASEDIR/introducer.port``, for introducers)
+    for the descriptor that was used last time.
+
+    If neither is available, the node will ask the kernel for any available
+    port (the moral equivalent of ``tcp:0``). The allocated port number will
+    be written into a descriptor string in ``BASEDIR/client.port`` (or
+    ``introducer.port``), so that subsequent runs will re-use the same port.
 
 ``tub.location = (string, optional)``
 
-    In addition to running as a client, each Tahoe-LAFS node also runs as a
-    server, listening for connections from other Tahoe-LAFS clients. The node
-    announces its location by publishing a "FURL" (a string with some
+    In addition to running as a client, each Tahoe-LAFS node can also run as
+    a server, listening for connections from other Tahoe-LAFS clients. The
+    node announces its location by publishing a "FURL" (a string with some
     connection hints) to the Introducer. The string it publishes can be found
     in ``BASEDIR/private/storage.furl`` . The ``tub.location`` configuration
     controls what location is published in this announcement.
 
+    If your node is meant to run as a server, you should fill this in, using
+    a hostname or IP address that is reachable from your intended clients.
+
     If you don't provide ``tub.location``, the node will try to figure out a
     useful one by itself, by using tools like "``ifconfig``" to determine the
     set of IP addresses on which it can be reached from nodes both near and
-    far.  It will also include the TCP port number on which it is listening
+    far. It will also include the TCP port number on which it is listening
     (either the one specified by ``tub.port``, or whichever port was assigned
-    by the kernel when ``tub.port`` is left unspecified).
+    by the kernel when ``tub.port`` is left unspecified). However this
+    automatic address-detection is discouraged, and will probably be removed
+    from a future release. It will include the ``127.0.0.1`` "localhost"
+    address (which is only useful to clients running on the same computer),
+    and RFC1918 private-network addresses like ``10.*.*.*`` and
+    ``192.168.*.*`` (which are only useful to clients on the local LAN). In
+    general, the automatically-detected IP addresses will only be useful if
+    the node has a public IP address, such as a VPS or colo-hosted server.
 
-    You might want to override this value if your node lives behind a
-    firewall that is doing inbound port forwarding, or if you are using other
-    proxies such that the local IP address or port number is not the same one
-    that remote clients should use to connect. You might also want to control
-    this when using a Tor proxy to avoid revealing your actual IP address
-    through the Introducer announcement.
+    You will certainly need to set ``tub.location`` if your node lives behind
+    a firewall that is doing inbound port forwarding, or if you are using
+    other proxies such that the local IP address or port number is not the
+    same one that remote clients should use to connect. You might also want
+    to control this when using a Tor proxy to avoid revealing your actual IP
+    address through the Introducer announcement.
 
     If ``tub.location`` is specified, by default it entirely replaces the
     automatically determined set of IP addresses. To include the automatically
     determined addresses as well as the specified ones, include the uppercase
     string "``AUTO``" in the list.
 
-    The value is a comma-separated string of host:port location hints, like
-    this::
+    The value is a comma-separated string of method:host:port location hints,
+    like this::
 
-      123.45.67.89:8098,tahoe.example.com:8098,127.0.0.1:8098
+      tcp:123.45.67.89:8098,tcp:tahoe.example.com:8098,tcp:127.0.0.1:8098
 
     A few examples:
 
-    * Emulate default behavior, assuming your host has IP address
-      123.45.67.89 and the kernel-allocated port number was 8098::
-
-        tub.port = 8098
-        tub.location = 123.45.67.89:8098,127.0.0.1:8098
-
     * Use a DNS name so you can change the IP address more easily::
 
-        tub.port = 8098
-        tub.location = tahoe.example.com:8098
+        tub.port = tcp:8098
+        tub.location = tcp:tahoe.example.com:8098
+
+    * Run a node behind a firewall (which has an external IP address) that
+      has been configured to forward external port 7912 to our internal
+      node's port 8098::
+
+        tub.port = tcp:8098
+        tub.location = tcp:external-firewall.example.com:7912
+
+    * Emulate default behavior, assuming your host has public IP address of
+      123.45.67.89, and the kernel-allocated port number was 8098::
+
+        tub.port = tcp:8098
+        tub.location = tcp:123.45.67.89:8098,tcp:127.0.0.1:8098
 
     * Use a DNS name but also include the default set of addresses::
 
-        tub.port = 8098
-        tub.location = tahoe.example.com:8098,AUTO
-
-    * Run a node behind a firewall (which has an external IP address) that
-      has been configured to forward port 7912 to our internal node's port
-      8098::
-
-        tub.port = 8098
-        tub.location = external-firewall.example.com:7912
+        tub.port = tcp:8098
+        tub.location = tcp:tahoe.example.com:8098,AUTO
 
     * Run a node behind a Tor proxy (perhaps via ``torsocks``), in
       client-only mode (i.e. we can make outbound connections, but other
@@ -201,8 +234,8 @@ set the ``tub.location`` option described below.
       reminder to human observers that this node cannot be reached. "Don't
       call us.. we'll call you"::
 
-        tub.port = 8098
-        tub.location = unreachable.example.org:0
+        tub.port = tcp:8098
+        tub.location = tcp:unreachable.example.org:0
 
     * Run a node behind a Tor proxy, and make the server available as a Tor
       "hidden service". (This assumes that other clients are running their
@@ -218,10 +251,8 @@ set the ``tub.location`` option described below.
       ``/var/lib/tor/hidden_services/tahoe/hostname``. Then set up your
       ``tahoe.cfg`` like::
 
-        tub.port = 8098
-        tub.location = ualhejtq2p7ohfbb.onion:29212
-
-    Most users will not need to set ``tub.location``.
+        tub.port = tcp:8098
+        tub.location = tor:ualhejtq2p7ohfbb.onion:29212
 
 ``log_gatherer.furl = (FURL, optional)``
 
@@ -272,19 +303,6 @@ set the ``tub.location`` option described below.
 
     .. _`#521`: https://tahoe-lafs.org/trac/tahoe-lafs/ticket/521
 
-``ssh.port = (strports string, optional)``
-
-``ssh.authorized_keys_file = (filename, optional)``
-
-    This enables an SSH-based interactive Python shell, which can be used to
-    inspect the internal state of the node, for debugging. To cause the node
-    to accept SSH connections on port 8022 from the same keys as the rest of
-    your account, use::
-
-      [tub]
-      ssh.port = 8022
-      ssh.authorized_keys_file = ~/.ssh/authorized_keys
-
 ``tempdir = (string, optional)``
 
     This specifies a temporary directory for the web-API server to use, for
@@ -296,8 +314,6 @@ set the ``tub.location`` option described below.
     (i.e. ``BASEDIR/tmp``), but it can be placed elsewhere. This directory is
     used for files that usually (on a Unix system) go into ``/tmp``. The
     string will be interpreted relative to the node's base directory.
-
-.. _webapi.rst: frontends/webapi.rst
 
 
 Client Configuration
@@ -316,13 +332,7 @@ Client Configuration
 ``helper.furl = (FURL string, optional)``
 
     If provided, the node will attempt to connect to and use the given helper
-    for uploads. See helper.rst_ for details.
-
-``key_generator.furl = (FURL string, optional)``
-
-    If provided, the node will attempt to connect to and use the given
-    key-generator service, using RSA keys from the external process rather
-    than generating its own.
+    for uploads. See :doc:`helper` for details.
 
 ``stats_gatherer.furl = (FURL string, optional)``
 
@@ -352,7 +362,7 @@ Client Configuration
     ratios are more reliable, and small ``N``/``k`` ratios use less disk
     space. ``N`` cannot be larger than 256, because of the 8-bit
     erasure-coding algorithm that Tahoe-LAFS uses. ``k`` can not be greater
-    than ``N``. See performance.rst_ for more details.
+    than ``N``. See :doc:`performance` for more details.
 
     ``shares.happy`` allows you control over how well to "spread out" the
     shares of an immutable file. For a successful upload, shares are
@@ -390,11 +400,7 @@ Client Configuration
     controlled by this parameter and will always use SDMF. We may revisit
     this decision in future versions of Tahoe-LAFS.
 
-    See mutable.rst_ for details about mutable file formats.
-
-.. _helper.rst: helper.rst
-.. _performance.rst: performance.rst
-.. _mutable.rst: specifications/mutable.rst
+    See :doc:`specifications/mutable` for details about mutable file formats.
 
 ``peers.preferred = (string, optional)``
 
@@ -436,33 +442,28 @@ HTTP
     directories and files, as well as a number of pages to check on the
     status of your Tahoe node. It also provides a machine-oriented "WAPI",
     with a REST-ful HTTP interface that can be used by other programs
-    (including the CLI tools). Please see webapi.rst_ for full details, and
-    the ``web.port`` and ``web.static`` config variables above.  The
-    `download-status.rst`_ document also describes a few WUI status pages.
+    (including the CLI tools). Please see :doc:`frontends/webapi` for full
+    details, and the ``web.port`` and ``web.static`` config variables above.
+    :doc:`frontends/download-status` also describes a few WUI status pages.
 
 CLI
 
-    The main "bin/tahoe" executable includes subcommands for manipulating the
+    The main ``tahoe`` executable includes subcommands for manipulating the
     filesystem, uploading/downloading files, and creating/running Tahoe
-    nodes. See CLI.rst_ for details.
+    nodes. See :doc:`frontends/CLI` for details.
 
 SFTP, FTP
 
     Tahoe can also run both SFTP and FTP servers, and map a username/password
-    pair to a top-level Tahoe directory. See FTP-and-SFTP.rst_ for
-    instructions on configuring these services, and the ``[sftpd]`` and
+    pair to a top-level Tahoe directory. See :doc:`frontends/FTP-and-SFTP`
+    for instructions on configuring these services, and the ``[sftpd]`` and
     ``[ftpd]`` sections of ``tahoe.cfg``.
 
 Drop-Upload
 
     As of Tahoe-LAFS v1.9.0, a node running on Linux can be configured to
     automatically upload files that are created or changed in a specified
-    local directory. See drop-upload.rst_ for details.
-
-.. _download-status.rst: frontends/download-status.rst
-.. _CLI.rst: frontends/CLI.rst
-.. _FTP-and-SFTP.rst: frontends/FTP-and-SFTP.rst
-.. _drop-upload.rst: frontends/drop-upload.rst
+    local directory. See :doc:`frontends/drop-upload` for details.
 
 
 Storage Server Configuration
@@ -522,10 +523,9 @@ Storage Server Configuration
 
     These settings control garbage collection, in which the server will
     delete shares that no longer have an up-to-date lease on them. Please see
-    garbage-collection.rst_ for full details.
+    :doc:`garbage-collection` for full details.
 
 .. _#390: https://tahoe-lafs.org/trac/tahoe-lafs/ticket/390
-.. _garbage-collection.rst: garbage-collection.rst
 
 
 Running A Helper
@@ -538,12 +538,12 @@ service.
 
 ``enabled = (boolean, optional)``
 
-    If ``True``, the node will run a helper (see helper.rst_ for details).
+    If ``True``, the node will run a helper (see :doc:`helper` for details).
     The helper's contact FURL will be placed in ``private/helper.furl``, from
     which it can be copied to any clients that wish to use it. Clearly nodes
     should not both run a helper and attempt to use one: do not create
-    ``helper.furl`` and also define ``[helper]enabled`` in the same node.
-    The default is ``False``.
+    ``helper.furl`` and also define ``[helper]enabled`` in the same node. The
+    default is ``False``.
 
 
 Running An Introducer
@@ -605,11 +605,6 @@ This section describes these other files.
   This file is used to construct an introducer, and is created by the
   "``tahoe create-introducer``" command.
 
-``tahoe-key-generator.tac``
-
-  This file is used to construct a key generator, and is created by the
-  "``tahoe create-key-gernerator``" command.
-
 ``tahoe-stats-gatherer.tac``
 
   This file is used to construct a statistics gatherer, and is created by the
@@ -634,7 +629,7 @@ This section describes these other files.
 ``private/helper.furl``
 
   If the node is running a helper (for use by other clients), its contact
-  FURL will be placed here. See helper.rst_ for more details.
+  FURL will be placed here. See :doc:`helper` for more details.
 
 ``private/root_dir.cap`` (optional)
 
@@ -696,7 +691,7 @@ Other files
   files. The web-API has a facility to block access to filecaps by their
   storage index, returning a 403 "Forbidden" error instead of the original
   file. For more details, see the "Access Blacklist" section of
-  webapi.rst_.
+  :doc:`frontends/webapi`.
 
 
 Example
@@ -717,8 +712,6 @@ a legal one.
   log_gatherer.furl = pb://soklj4y7eok5c3xkmjeqpw@192.168.69.247:44801/eqpwqtzm
   timeout.keepalive = 240
   timeout.disconnect = 1800
-  ssh.port = 8022
-  ssh.authorized_keys_file = ~/.ssh/authorized_keys
   
   [client]
   introducer.furl = pb://ok45ssoklj4y7eok5c3xkmj@tahoe.example:44801/ii3uumo
@@ -739,6 +732,4 @@ Old Configuration Files
 Tahoe-LAFS releases before v1.3.0 had no ``tahoe.cfg`` file, and used
 distinct files for each item. This is no longer supported and if you have
 configuration in the old format you must manually convert it to the new
-format for Tahoe-LAFS to detect it. See `historical/configuration.rst`_.
-
-.. _historical/configuration.rst: historical/configuration.rst
+format for Tahoe-LAFS to detect it. See :doc:`historical/configuration`.

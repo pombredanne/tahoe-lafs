@@ -15,7 +15,6 @@ from allmydata.immutable.literal import LiteralFileNode
 from allmydata.immutable.filenode import ImmutableFileNode
 from allmydata.util import idlib, mathutil
 from allmydata.util import log, base32
-from allmydata.util.verlib import NormalizedVersion
 from allmydata.util.encodingutil import quote_output, unicode_to_argv
 from allmydata.util.fileutil import abspath_expanduser_unicode
 from allmydata.util.consumer import MemoryConsumer, download_to_data
@@ -27,7 +26,6 @@ from allmydata.mutable.common import NotWriteableError
 from allmydata.mutable import layout as mutable_layout
 from allmydata.mutable.publish import MutableData
 
-import foolscap
 from foolscap.api import DeadReferenceError, fireEventually
 from twisted.python.failure import Failure
 from twisted.web.client import getPage
@@ -477,7 +475,7 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
         NEWERDATA = "this is getting old"
         NEWERDATA_uploadable = MutableData(NEWERDATA)
 
-        d = self.set_up_nodes(use_key_generator=True)
+        d = self.set_up_nodes()
 
         def _create_mutable(res):
             c = self.clients[0]
@@ -674,25 +672,6 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
                            self.failUnlessEqual(len(res["manifest"]), 1))
             return d1
         d.addCallback(_created_dirnode)
-
-        def wait_for_c3_kg_conn():
-            return self.clients[3]._key_generator is not None
-        d.addCallback(lambda junk: self.poll(wait_for_c3_kg_conn))
-
-        def check_kg_poolsize(junk, size_delta):
-            self.failUnlessEqual(len(self.key_generator_svc.key_generator.keypool),
-                                 self.key_generator_svc.key_generator.pool_size + size_delta)
-
-        d.addCallback(check_kg_poolsize, 0)
-        d.addCallback(lambda junk:
-            self.clients[3].create_mutable_file(MutableData('hello, world')))
-        d.addCallback(check_kg_poolsize, -1)
-        d.addCallback(lambda junk: self.clients[3].create_dirnode())
-        d.addCallback(check_kg_poolsize, -2)
-        # use_helper induces use of clients[3], which is the using-key_gen client
-        d.addCallback(lambda junk:
-                      self.POST("uri?t=mkdir&name=george", use_helper=True))
-        d.addCallback(check_kg_poolsize, -3)
 
         return d
 
@@ -1112,7 +1091,7 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
         d.addCallback(lambda res: getPage(self.helper_webish_url))
         def _got_welcome_helper(page):
             html = page.replace('\n', ' ')
-            self.failUnless(re.search('<img src="img/connected-yes.png" alt="Connected" />', html), page)
+            self.failUnless(re.search('<img (src="img/connected-yes.png" |alt="Connected" ){2}/>', html), page)
             self.failUnlessIn("Not running helper", page)
         d.addCallback(_got_welcome_helper)
 
@@ -1877,10 +1856,6 @@ class SystemTest(SystemTestMixin, RunBinTahoeMixin, unittest.TestCase):
 
 class Connections(SystemTestMixin, unittest.TestCase):
     def test_rref(self):
-        if NormalizedVersion(foolscap.__version__) < NormalizedVersion('0.6.4'):
-            raise unittest.SkipTest("skipped due to http://foolscap.lothar.com/trac/ticket/196 "
-                                    "(which does not affect normal usage of Tahoe-LAFS)")
-
         self.basedir = "system/Connections/rref"
         d = self.set_up_nodes(2)
         def _start(ign):

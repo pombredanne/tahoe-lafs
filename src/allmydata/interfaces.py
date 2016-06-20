@@ -1,5 +1,5 @@
 
-from zope.interface import Interface
+from zope.interface import Interface, Attribute
 from foolscap.api import StringConstraint, ListOf, TupleOf, SetOf, DictOf, \
      ChoiceOf, IntegerConstraint, Any, RemoteInterface, Referenceable
 
@@ -417,7 +417,6 @@ class IStorageBroker(Interface):
         public attributes::
 
           service_name: the type of service provided, like 'storage'
-          announcement_time: when we first heard about this service
           last_connect_time: when we last established a connection
           last_loss_time: when we last lost a connection
 
@@ -460,7 +459,7 @@ class IDisplayableServer(Interface):
 
 class IServer(IDisplayableServer):
     """I live in the client, and represent a single server."""
-    def start_connecting(tub, trigger_cb):
+    def start_connecting(trigger_cb):
         pass
 
     def get_rref():
@@ -625,6 +624,38 @@ class MustNotBeUnknownRWError(CapConstraintError):
     """Cannot add an unknown child cap specified in a rw_uri field."""
 
 
+class IProgress(Interface):
+    """
+    Remembers progress measured in arbitrary units. Users of these
+    instances must call ``set_progress_total`` at least once before
+    progress can be valid, and must use the same units for both
+    ``set_progress_total`` and ``set_progress calls``.
+
+    See also:
+    :class:`allmydata.util.progress.PercentProgress`
+    """
+
+    progress = Attribute(
+        "Current amount of progress (in percentage)"
+    )
+
+    def set_progress(self, value):
+        """
+        Sets the current amount of progress.
+
+        Arbitrary units, but must match units used for
+        set_progress_total.
+        """
+
+    def set_progress_total(self, value):
+        """
+        Sets the total amount of expected progress
+
+        Arbitrary units, but must be same units as used when calling
+        set_progress() on this instance)..
+        """
+
+
 class IReadable(Interface):
     """I represent a readable object -- either an immutable file, or a
     specific version of a mutable file.
@@ -654,9 +685,12 @@ class IReadable(Interface):
     def get_size():
         """Return the length (in bytes) of this readable object."""
 
-    def download_to_data():
+    def download_to_data(progress=None):
         """Download all of the file contents. I return a Deferred that fires
-        with the contents as a byte string."""
+        with the contents as a byte string.
+
+        :param progress: None or IProgress implementer
+        """
 
     def read(consumer, offset=0, size=None):
         """Download a portion (possibly all) of the file's contents, making
@@ -916,10 +950,12 @@ class IFileNode(IFilesystemNode):
         the Deferred will errback with an UnrecoverableFileError.
         """
 
-    def download_best_version():
+    def download_best_version(progress=None):
         """Download the contents of the version that would be returned
         by get_best_readable_version(). This is equivalent to calling
         download_to_data() on the IReadable given by that method.
+
+        progress is anything that implements IProgress
 
         I return a Deferred that fires with a byte string when the file
         has been fully downloaded. To support streaming download, use
@@ -1066,7 +1102,7 @@ class IMutableFileNode(IFileNode):
         everything) to get increased visibility.
         """
 
-    def upload(new_contents, servermap):
+    def upload(new_contents, servermap, progress=None):
         """Replace the contents of the file with new ones. This requires a
         servermap that was previously updated with MODE_WRITE.
 
@@ -1086,6 +1122,8 @@ class IMutableFileNode(IFileNode):
         wait a random interval (with exponential backoff) and repeat your
         operation. If I do not signal UncoordinatedWriteError, then I was
         able to write the new version without incident.
+
+        ``progress`` is either None or an IProgress provider
 
         I return a Deferred that fires (with a PublishStatus object) when the
         publish has completed. I will update the servermap in-place with the
@@ -1277,11 +1315,13 @@ class IDirectoryNode(IFilesystemNode):
         equivalent to calling set_node() multiple times, but is much more
         efficient."""
 
-    def add_file(name, uploadable, metadata=None, overwrite=True):
+    def add_file(name, uploadable, metadata=None, overwrite=True, progress=None):
         """I upload a file (using the given IUploadable), then attach the
         resulting ImmutableFileNode to the directory at the given name. I set
         metadata the same way as set_uri and set_node. The child name must be
         a unicode string.
+
+        ``progress`` either provides IProgress or is None
 
         I return a Deferred that fires (with the IFileNode of the uploaded
         file) when the operation completes."""
@@ -2767,20 +2807,6 @@ class IStatsProducer(Interface):
         returns a dictionary, with str keys representing the names of stats
         to be monitored, and numeric values.
         """
-
-class RIKeyGenerator(RemoteInterface):
-    __remote_name__ = "RIKeyGenerator.tahoe.allmydata.com"
-    """
-    Provides a service offering to make RSA key pairs.
-    """
-
-    def get_rsa_key_pair(key_size=int):
-        """
-        @param key_size: the size of the signature key.
-        @return: tuple(verifying_key, signing_key)
-        """
-        return TupleOf(str, str)
-
 
 class FileTooLargeError(Exception):
     pass

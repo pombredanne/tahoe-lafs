@@ -48,15 +48,10 @@ class IntroducerNode(node.Node):
                 """
                 raise FurlFileConflictError(textwrap.dedent(msg))
             os.rename(old_public_fn, private_fn)
-        d = self.when_tub_ready()
-        def _publish(res):
-            furl = self.tub.registerReference(introducerservice,
-                                              furlFile=private_fn)
-            self.log(" introducer is at %s" % furl, umid="qF2L9A")
-            self.introducer_url = furl # for tests
-        d.addCallback(_publish)
-        d.addErrback(log.err, facility="tahoe.init",
-                     level=log.BAD, umid="UaNs9A")
+        furl = self.tub.registerReference(introducerservice,
+                                          furlFile=private_fn)
+        self.log(" introducer is at %s" % furl, umid="qF2L9A")
+        self.introducer_url = furl # for tests
 
     def init_web(self, webport):
         self.log("init_web(webport=%s)", args=(webport,), umid="2bUygA")
@@ -95,9 +90,6 @@ class WrapV1SubscriberInV2Interface: # for_v1
     def wrap_announce_v2(self, announcements):
         anns_v1 = [convert_announcement_v2_to_v1(ann) for ann in announcements]
         return self.original.callRemote("announce", set(anns_v1))
-    def wrap_set_encoding_parameters(self, parameters):
-        # note: unused
-        return self.original.callRemote("set_encoding_parameters", parameters)
     def notifyOnDisconnect(self, *args, **kwargs):
         return self.original.notifyOnDisconnect(*args, **kwargs)
 

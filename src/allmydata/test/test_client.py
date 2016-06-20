@@ -11,7 +11,6 @@ from allmydata.node import Node, OldConfigError, OldConfigOptionError, MissingCo
 from allmydata.frontends.auth import NeedRootcapLookupScheme
 from allmydata import client
 from allmydata.storage_client import StorageFarmBroker
-from allmydata.manhole import AuthorizedKeysManhole
 from allmydata.util import base32, fileutil
 from allmydata.interfaces import IFilesystemNode, IFileNode, \
      IImmutableFileNode, IMutableFileNode, IDirectoryNode
@@ -195,20 +194,6 @@ class Basic(testutil.ReallyEqualMixin, unittest.TestCase):
         expected = fileutil.abspath_expanduser_unicode(u"relative", abs_basedir)
         self.failUnlessReallyEqual(w.staticdir, expected)
 
-    def test_manhole_keyfile(self):
-        basedir = u"client.Basic.test_manhole_keyfile"
-        os.mkdir(basedir)
-        fileutil.write(os.path.join(basedir, "tahoe.cfg"),
-                       BASECONFIG +
-                       "[node]\n" +
-                       "ssh.port = tcp:0:interface=127.0.0.1\n" +
-                       "ssh.authorized_keys_file = relative\n")
-        c = client.Client(basedir)
-        m = [s for s in c if isinstance(s, AuthorizedKeysManhole)][0]
-        abs_basedir = fileutil.abspath_expanduser_unicode(basedir)
-        expected = fileutil.abspath_expanduser_unicode(u"relative", abs_basedir)
-        self.failUnlessReallyEqual(m.keyfile, expected)
-
     # TODO: also test config options for SFTP.
 
     def test_ftp_auth_keyfile(self):
@@ -251,7 +236,7 @@ class Basic(testutil.ReallyEqualMixin, unittest.TestCase):
         return [ s.get_longname() for s in sb.get_servers_for_psi(key) ]
 
     def test_permute(self):
-        sb = StorageFarmBroker(None, True)
+        sb = StorageFarmBroker(True)
         for k in ["%d" % i for i in range(5)]:
             ann = {"anonymous-storage-FURL": "pb://abcde@nowhere/fake",
                    "permutation-seed-base32": base32.b2a(k) }
@@ -263,7 +248,7 @@ class Basic(testutil.ReallyEqualMixin, unittest.TestCase):
         self.failUnlessReallyEqual(self._permute(sb, "one"), [])
 
     def test_permute_with_preferred(self):
-        sb = StorageFarmBroker(None, True, ['1','4'])
+        sb = StorageFarmBroker(True, ['1','4'])
         for k in ["%d" % i for i in range(5)]:
             ann = {"anonymous-storage-FURL": "pb://abcde@nowhere/fake",
                    "permutation-seed-base32": base32.b2a(k) }

@@ -10,7 +10,7 @@ from allmydata.util import fileutil, pollmixin
 from allmydata.util.fileutil import abspath_expanduser_unicode
 from allmydata.util.encodingutil import get_filesystem_encoding
 from foolscap.api import Tub, fireEventually, flushEventualQueue
-from twisted.python import log
+from twisted.python import log, procutils
 
 class StallableHTTPGetterDiscarder(tw_client.HTTPPageGetter):
     full_speed_ahead = False
@@ -116,10 +116,8 @@ class SystemFramework(pollmixin.PollMixin):
         #print "STARTING"
         self.stats = {}
         self.statsfile = open(os.path.join(self.basedir, "stats.out"), "a")
-        d = self.make_introducer()
-        def _more(res):
-            return self.start_client()
-        d.addCallback(_more)
+        self.make_introducer()
+        d = self.start_client()
         def _record_control_furl(control_furl):
             self.control_furl = control_furl
             #print "OBTAINING '%s'" % (control_furl,)
@@ -174,12 +172,7 @@ class SystemFramework(pollmixin.PollMixin):
         os.mkdir(iv_basedir)
         iv = introducer.IntroducerNode(basedir=iv_basedir)
         self.introducer = self.add_service(iv)
-        d = self.introducer.when_tub_ready()
-        def _introducer_ready(res):
-            q = self.introducer
-            self.introducer_furl = q.introducer_url
-        d.addCallback(_introducer_ready)
-        return d
+        self.introducer_furl = self.introducer.introducer_url
 
     def make_nodes(self):
         self.nodes = []
@@ -268,7 +261,10 @@ this file are ignored.
         pp = ClientWatcher()
         self.proc_done = pp.d = defer.Deferred()
         logfile = os.path.join(self.basedir, "client.log")
-        cmd = ["twistd", "-n", "-y", "tahoe-client.tac", "-l", logfile]
+        tahoes = procutils.which("tahoe")
+        if not tahoes:
+            raise RuntimeError("unable to find a 'tahoe' executable")
+        cmd = [tahoes[0], "run", ".", "-l", logfile]
         env = os.environ.copy()
         self.proc = reactor.spawnProcess(pp, cmd[0], cmd, env, path=clientdir_str)
         log.msg("CLIENT STARTED")

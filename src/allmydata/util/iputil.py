@@ -1,5 +1,5 @@
 # from the Python Standard Library
-import os, re, socket, subprocess, errno
+import os, sys, re, socket, subprocess, errno
 
 from sys import platform
 
@@ -8,6 +8,7 @@ from twisted.internet import defer, threads, reactor
 from twisted.internet.protocol import DatagramProtocol
 from twisted.internet.error import CannotListenError
 from twisted.python.procutils import which
+from twisted.python.runtime import platformType
 from twisted.python import log
 
 try:
@@ -70,6 +71,8 @@ except ImportError:
     # since one might be shadowing the other. This hack appeases pyflakes.
     increase_rlimits = _increase_rlimits
 
+def get_local_addresses_sync():
+    return _synchronously_find_addresses_via_config()
 
 def get_local_addresses_async(target="198.41.0.4"): # A.ROOT-SERVERS.NET
     """
@@ -130,10 +133,16 @@ def get_local_ip_for(target):
     try:
         udpprot = DatagramProtocol()
         port = reactor.listenUDP(0, udpprot)
-        udpprot.transport.connect(target_ipaddr, 7)
-        localip = udpprot.transport.getHost().host
-        d = port.stopListening()
-        d.addErrback(log.err)
+        try:
+            # connect() will fail if we're offline (e.g. running tests on a
+            # disconnected laptop), which is fine (localip=None), but we must
+            # still do port.stopListening() or we'll get a DirtyReactorError
+            udpprot.transport.connect(target_ipaddr, 7)
+            localip = udpprot.transport.getHost().host
+            return localip
+        finally:
+            d = port.stopListening()
+            d.addErrback(log.err)
     except (socket.error, CannotListenError):
         # no route to that host
         localip = None
@@ -227,3 +236,19 @@ def _cygwin_hack_find_addresses():
             addresses.append(addr)
 
     return defer.succeed(addresses)
+
+def allocate_tcp_port():
+    """Return an (integer) available TCP port on localhost. This briefly
+    listens on the port in question, then closes it right away."""
+    # We want to bind() the socket but not listen(). Twisted (in
+    # tcp.Port.createInternetSocket) would do several other things:
+    # non-blocking, close-on-exec, and SO_REUSEADDR. We don't need
+    # non-blocking because we never listen on it, and we don't need
+    # close-on-exec because we close it right away. So just add SO_REUSEADDR.
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if platformType == "posix" and sys.platform != "cygwin":
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port

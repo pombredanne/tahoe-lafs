@@ -18,11 +18,10 @@ from allmydata.storage_client import StubServer
 from allmydata.mutable.layout import unpack_header
 from allmydata.mutable.publish import MutableData
 from allmydata.storage.mutable import MutableShareFile
-from allmydata.util import hashutil, log, fileutil, pollmixin
+from allmydata.util import hashutil, log, fileutil, pollmixin, iputil
 from allmydata.util.assertutil import precondition
 from allmydata.util.consumer import download_to_data
 from allmydata.stats import StatsGathererService
-from allmydata.key_generator import KeyGeneratorService
 import allmydata.test.common_util as testutil
 from allmydata import immutable
 
@@ -151,8 +150,8 @@ class FakeCHKFileNode:
         return defer.succeed(self)
 
 
-    def download_to_data(self):
-        return download_to_data(self)
+    def download_to_data(self, progress=None):
+        return download_to_data(self, progress=progress)
 
 
     download_best_version = download_to_data
@@ -329,11 +328,11 @@ class FakeMutableFileNode:
         d.addCallback(_done)
         return d
 
-    def download_best_version(self):
-        return defer.succeed(self._download_best_version())
+    def download_best_version(self, progress=None):
+        return defer.succeed(self._download_best_version(progress=progress))
 
 
-    def _download_best_version(self, ignored=None):
+    def _download_best_version(self, ignored=None, progress=None):
         if isinstance(self.my_uri, uri.LiteralFileURI):
             return self.my_uri.data
         if self.storage_index not in self.all_contents:
@@ -448,8 +447,6 @@ class SystemTestMixin(pollmixin.PollMixin, testutil.StallMixin):
 
         self.stats_gatherer = None
         self.stats_gatherer_furl = None
-        self.key_generator_svc = None
-        self.key_generator_furl = None
 
     def tearDown(self):
         log.msg("shutting down SystemTest services")
@@ -464,8 +461,7 @@ class SystemTestMixin(pollmixin.PollMixin, testutil.StallMixin):
         s.setServiceParent(self.sparent)
         return s
 
-    def set_up_nodes(self, NUMCLIENTS=5,
-                     use_stats_gatherer=False, use_key_generator=False):
+    def set_up_nodes(self, NUMCLIENTS=5, use_stats_gatherer=False):
         self.numclients = NUMCLIENTS
         iv_dir = self.getdir("introducer")
         if not os.path.isdir(iv_dir):
@@ -481,18 +477,16 @@ class SystemTestMixin(pollmixin.PollMixin, testutil.StallMixin):
                 f.close()
         iv = IntroducerNode(basedir=iv_dir)
         self.introducer = self.add_service(iv)
-        d = self.introducer.when_tub_ready()
-        d.addCallback(self._get_introducer_web)
+        self._get_introducer_web()
+        d = defer.succeed(None)
         if use_stats_gatherer:
             d.addCallback(self._set_up_stats_gatherer)
-        if use_key_generator:
-            d.addCallback(self._set_up_key_generator)
         d.addCallback(self._set_up_nodes_2)
         if use_stats_gatherer:
             d.addCallback(self._grab_stats)
         return d
 
-    def _get_introducer_web(self, res):
+    def _get_introducer_web(self):
         f = open(os.path.join(self.getdir("introducer"), "node.url"), "r")
         self.introweb_url = f.read().strip()
         f.close()
@@ -500,6 +494,11 @@ class SystemTestMixin(pollmixin.PollMixin, testutil.StallMixin):
     def _set_up_stats_gatherer(self, res):
         statsdir = self.getdir("stats_gatherer")
         fileutil.make_dirs(statsdir)
+        portnum = iputil.allocate_tcp_port()
+        location = "tcp:127.0.0.1:%d" % portnum
+        fileutil.write(os.path.join(statsdir, "location"), location)
+        port = "tcp:%d:interface=127.0.0.1" % portnum
+        fileutil.write(os.path.join(statsdir, "port"), port)
         self.stats_gatherer_svc = StatsGathererService(statsdir)
         self.stats_gatherer = self.stats_gatherer_svc.stats_gatherer
         self.add_service(self.stats_gatherer_svc)
@@ -511,27 +510,6 @@ class SystemTestMixin(pollmixin.PollMixin, testutil.StallMixin):
         d.addCallback(lambda junk: self.poll(check_for_furl, timeout=30))
         def get_furl(junk):
             self.stats_gatherer_furl = file(sgf, 'rb').read().strip()
-        d.addCallback(get_furl)
-        return d
-
-    def _set_up_key_generator(self, res):
-        kgsdir = self.getdir("key_generator")
-        fileutil.make_dirs(kgsdir)
-
-        self.key_generator_svc = KeyGeneratorService(kgsdir,
-                                                     display_furl=False,
-                                                     default_key_size=TEST_RSA_KEY_SIZE)
-        self.key_generator_svc.key_generator.pool_size = 4
-        self.key_generator_svc.key_generator.pool_refresh_delay = 60
-        self.add_service(self.key_generator_svc)
-
-        d = fireEventually()
-        def check_for_furl():
-            return os.path.exists(os.path.join(kgsdir, 'key_generator.furl'))
-        d.addCallback(lambda junk: self.poll(check_for_furl, timeout=30))
-        def get_furl(junk):
-            kgf = os.path.join(kgsdir, 'key_generator.furl')
-            self.key_generator_furl = file(kgf, 'rb').read().strip()
         d.addCallback(get_furl)
         return d
 
@@ -556,19 +534,21 @@ class SystemTestMixin(pollmixin.PollMixin, testutil.StallMixin):
 
             nodeconfig = "[node]\n"
             nodeconfig += (u"nickname = client %d \u263A\n" % (i,)).encode('utf-8')
+            tub_port = iputil.allocate_tcp_port()
+            # Don't let it use AUTO: there's no need for tests to use
+            # anything other than 127.0.0.1
+            nodeconfig += "tub.port = tcp:%d\n" % tub_port
+            nodeconfig += "tub.location = tcp:127.0.0.1:%d\n" % tub_port
 
             if i == 0:
-                # clients[0] runs a webserver and a helper, no key_generator
+                # clients[0] runs a webserver and a helper
                 config += nodeconfig
                 config += "web.port = tcp:0:interface=127.0.0.1\n"
                 config += "timeout.keepalive = 600\n"
                 config += "[helper]\n"
                 config += "enabled = True\n"
             elif i == 3:
-                # clients[3] runs a webserver and uses a helper, uses
-                # key_generator
-                if self.key_generator_furl:
-                    config += "key_generator.furl = %s\n" % self.key_generator_furl
+                # clients[3] runs a webserver and uses a helper
                 config += nodeconfig
                 config += "web.port = tcp:0:interface=127.0.0.1\n"
                 config += "timeout.disconnect = 1800\n"
@@ -586,27 +566,25 @@ class SystemTestMixin(pollmixin.PollMixin, testutil.StallMixin):
         c = self.add_service(client.Client(basedir=basedirs[0]))
         self.clients.append(c)
         c.set_default_mutable_keysize(TEST_RSA_KEY_SIZE)
-        d = c.when_tub_ready()
-        def _ready(res):
-            f = open(os.path.join(basedirs[0],"private","helper.furl"), "r")
-            helper_furl = f.read()
-            f.close()
-            self.helper_furl = helper_furl
-            if self.numclients >= 4:
-                f = open(os.path.join(basedirs[3], 'tahoe.cfg'), 'ab+')
-                f.write(
-                      "[client]\n"
-                      "helper.furl = %s\n" % helper_furl)
-                f.close()
 
-            # this starts the rest of the clients
-            for i in range(1, self.numclients):
-                c = self.add_service(client.Client(basedir=basedirs[i]))
-                self.clients.append(c)
-                c.set_default_mutable_keysize(TEST_RSA_KEY_SIZE)
-            log.msg("STARTING")
-            return self.wait_for_connections()
-        d.addCallback(_ready)
+        f = open(os.path.join(basedirs[0],"private","helper.furl"), "r")
+        helper_furl = f.read()
+        f.close()
+        self.helper_furl = helper_furl
+        if self.numclients >= 4:
+            f = open(os.path.join(basedirs[3], 'tahoe.cfg'), 'ab+')
+            f.write(
+                  "[client]\n"
+                  "helper.furl = %s\n" % helper_furl)
+            f.close()
+
+        # this starts the rest of the clients
+        for i in range(1, self.numclients):
+            c = self.add_service(client.Client(basedir=basedirs[i]))
+            self.clients.append(c)
+            c.set_default_mutable_keysize(TEST_RSA_KEY_SIZE)
+        log.msg("STARTING")
+        d = self.wait_for_connections()
         def _connected(res):
             log.msg("CONNECTED")
             # now find out where the web port was
@@ -638,7 +616,6 @@ class SystemTestMixin(pollmixin.PollMixin, testutil.StallMixin):
             self.clients[num] = new_c
             new_c.set_default_mutable_keysize(TEST_RSA_KEY_SIZE)
             self.add_service(new_c)
-            return new_c.when_tub_ready()
         d.addCallback(_stopped)
         d.addCallback(lambda res: self.wait_for_connections())
         def _maybe_get_webport(res):

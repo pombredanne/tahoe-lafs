@@ -5,6 +5,7 @@ from twisted.trial import unittest
 
 from twisted.python import usage, runtime
 from twisted.internet import threads
+from twisted.internet.defer import inlineCallbacks, returnValue
 
 from allmydata.util import fileutil, pollmixin
 from allmydata.util.encodingutil import unicode_to_argv, unicode_to_output, get_filesystem_encoding
@@ -12,6 +13,7 @@ from allmydata.scripts import runner
 from allmydata.client import Client
 from allmydata.test import common_util
 import allmydata
+from allmydata._appname import __appname__
 
 
 timeout = 240
@@ -32,40 +34,25 @@ def get_root_from_file(src):
 srcfile = allmydata.__file__
 rootdir = get_root_from_file(srcfile)
 
-if hasattr(sys, 'frozen'):
-    bintahoe = os.path.join(rootdir, 'tahoe')
-    if sys.platform == "win32" and os.path.exists(bintahoe + '.exe'):
-        bintahoe += '.exe'
-else:
-    bintahoe = os.path.join(rootdir, 'bin', 'tahoe')
-    if sys.platform == "win32":
-        bintahoe += '.pyscript'
-        if not os.path.exists(bintahoe):
-            alt_bintahoe = os.path.join(rootdir, 'Scripts', 'tahoe.pyscript')
-            if os.path.exists(alt_bintahoe):
-                bintahoe = alt_bintahoe
-
 
 class RunBinTahoeMixin:
-    def skip_if_cannot_run_bintahoe(self):
-        if not os.path.exists(bintahoe):
-            raise unittest.SkipTest("The bin/tahoe script isn't to be found in the expected location (%s), and I don't want to test a 'tahoe' executable that I find somewhere else, in case it isn't the right executable for this version of Tahoe. Perhaps running 'setup.py build' again will help." % (bintahoe,))
-
     def skip_if_cannot_daemonize(self):
-        self.skip_if_cannot_run_bintahoe()
         if runtime.platformType == "win32":
             # twistd on windows doesn't daemonize. cygwin should work normally.
             raise unittest.SkipTest("twistd does not fork under windows")
 
-    def run_bintahoe(self, args, stdin=None, python_options=[], env=None):
-        self.skip_if_cannot_run_bintahoe()
+    @inlineCallbacks
+    def find_import_location(self):
+        res = yield self.run_bintahoe(["--version-and-path"])
+        out, err, rc_or_sig = res
+        self.assertEqual(rc_or_sig, 0, res)
+        lines = out.splitlines()
+        tahoe_pieces = lines[0].split()
+        self.assertEqual(tahoe_pieces[0], "%s:" % (__appname__,), (tahoe_pieces, res))
+        returnValue(tahoe_pieces[-1].strip("()"))
 
-        if hasattr(sys, 'frozen'):
-            if python_options:
-                raise unittest.SkipTest("This test doesn't apply to frozen builds.")
-            command = [bintahoe] + args
-        else:
-            command = [sys.executable] + python_options + [bintahoe] + args
+    def run_bintahoe(self, args, stdin=None, python_options=[], env=None):
+        command = [sys.executable] + python_options + ["-m", "allmydata.scripts.runner"] + args
 
         if stdin is None:
             stdin_stream = None
@@ -80,66 +67,29 @@ class RunBinTahoeMixin:
 
 
 class BinTahoe(common_util.SignalMixin, unittest.TestCase, RunBinTahoeMixin):
-    def _check_right_code(self, file_to_check):
-        root_to_check = get_root_from_file(file_to_check)
-        if os.path.basename(root_to_check) == 'dist':
-            root_to_check = os.path.dirname(root_to_check)
+    @inlineCallbacks
+    def test_the_right_code(self):
+        # running "tahoe" in a subprocess should find the same code that
+        # holds this test file, else something is weird
+        test_path = os.path.dirname(os.path.dirname(os.path.normcase(os.path.realpath(srcfile))))
+        bintahoe_import_path = yield self.find_import_location()
 
-        cwd = os.path.normcase(os.path.realpath("."))
-        root_from_cwd = os.path.dirname(cwd)
-        if os.path.basename(root_from_cwd) == 'src':
-            root_from_cwd = os.path.dirname(root_from_cwd)
-
-        # This is needed if we are running in a temporary directory created by 'make tmpfstest'.
-        if os.path.basename(root_from_cwd).startswith('tmp'):
-            root_from_cwd = os.path.dirname(root_from_cwd)
-
-        same = (root_from_cwd == root_to_check)
+        same = (bintahoe_import_path == test_path)
         if not same:
-            try:
-                same = os.path.samefile(root_from_cwd, root_to_check)
-            except AttributeError, e:
-                e  # hush pyflakes
+            msg = ("My tests and my 'tahoe' executable are using different paths.\n"
+                   "tahoe: %r\n"
+                   "tests: %r\n"
+                   "( according to the test source filename %r)\n" %
+                   (bintahoe_import_path, test_path, srcfile))
 
-        if not same:
-            msg = ("We seem to be testing the code at %r,\n"
-                   "(according to the source filename %r),\n"
-                   "but expected to be testing the code at %r.\n"
-                   % (root_to_check, file_to_check, root_from_cwd))
-
-            root_from_cwdu = os.path.dirname(os.path.normcase(os.path.normpath(os.getcwdu())))
-            if os.path.basename(root_from_cwdu) == u'src':
-                root_from_cwdu = os.path.dirname(root_from_cwdu)
-
-            # This is needed if we are running in a temporary directory created by 'make tmpfstest'.
-            if os.path.basename(root_from_cwdu).startswith(u'tmp'):
-                root_from_cwdu = os.path.dirname(root_from_cwdu)
-
-            if not isinstance(root_from_cwd, unicode) and root_from_cwd.decode(get_filesystem_encoding(), 'replace') != root_from_cwdu:
-                msg += ("However, this may be a false alarm because the current directory path\n"
-                        "is not representable in the filesystem encoding. Please run the tests\n"
-                        "from the root of the Tahoe-LAFS distribution at a non-Unicode path.")
+            if (not isinstance(rootdir, unicode) and
+                rootdir.decode(get_filesystem_encoding(), 'replace') != rootdir):
+                msg += ("However, this may be a false alarm because the import path\n"
+                        "is not representable in the filesystem encoding.")
                 raise unittest.SkipTest(msg)
             else:
-                msg += "Please run the tests from the root of the Tahoe-LAFS distribution."
+                msg += "Please run the tests in a virtualenv that includes both the Tahoe-LAFS library and the 'tahoe' executable."
                 self.fail(msg)
-
-    def test_the_right_code(self):
-        self._check_right_code(srcfile)
-
-    def test_import_in_repl(self):
-        d = self.run_bintahoe(["debug", "repl"],
-                              stdin="import allmydata; print; print allmydata.__file__")
-        def _cb(res):
-            out, err, rc_or_sig = res
-            self.failUnlessEqual(rc_or_sig, 0, str(res))
-            lines = out.splitlines()
-            self.failUnlessIn('>>>', lines[0], str(res))
-            self._check_right_code(lines[1])
-        d.addCallback(_cb)
-        return d
-    # The timeout was exceeded on FreeStorm's CentOS5-i386.
-    test_import_in_repl.timeout = 480
 
     def test_path(self):
         d = self.run_bintahoe(["--version-and-path"])
@@ -178,8 +128,6 @@ class BinTahoe(common_util.SignalMixin, unittest.TestCase, RunBinTahoeMixin):
         return d
 
     def test_unicode_arguments_and_output(self):
-        self.skip_if_cannot_run_bintahoe()
-
         tricky = u"\u2621"
         try:
             tricky_arg = unicode_to_argv(tricky, mangle=True)
@@ -206,8 +154,6 @@ class BinTahoe(common_util.SignalMixin, unittest.TestCase, RunBinTahoeMixin):
         return d
 
     def test_version_no_noise(self):
-        self.skip_if_cannot_run_bintahoe()
-
         d = self.run_bintahoe(["--version"])
         def _cb(res):
             out, err, rc_or_sig = res
@@ -238,14 +184,14 @@ class CreateNode(unittest.TestCase):
         rc = runner.runner(argv, stdout=out, stderr=err)
         return rc, out.getvalue(), err.getvalue()
 
-    def do_create(self, kind):
+    def do_create(self, kind, *args):
         basedir = self.workdir("test_" + kind)
         command = "create-" + kind
         is_client = kind in ("node", "client")
         tac = is_client and "tahoe-client.tac" or ("tahoe-" + kind + ".tac")
 
         n1 = os.path.join(basedir, command + "-n1")
-        argv = ["--quiet", command, "--basedir", n1]
+        argv = ["--quiet", command, "--basedir", n1] + list(args)
         rc, out, err = self.run_tahoe(argv)
         self.failUnlessEqual(err, "")
         self.failUnlessEqual(out, "")
@@ -280,7 +226,7 @@ class CreateNode(unittest.TestCase):
 
         # test that the non --basedir form works too
         n2 = os.path.join(basedir, command + "-n2")
-        argv = ["--quiet", command, n2]
+        argv = ["--quiet", command] + list(args) + [n2]
         rc, out, err = self.run_tahoe(argv)
         self.failUnlessEqual(err, "")
         self.failUnlessEqual(out, "")
@@ -290,7 +236,7 @@ class CreateNode(unittest.TestCase):
 
         # test the --node-directory form
         n3 = os.path.join(basedir, command + "-n3")
-        argv = ["--quiet", "--node-directory", n3, command]
+        argv = ["--quiet", "--node-directory", n3, command] + list(args)
         rc, out, err = self.run_tahoe(argv)
         self.failUnlessEqual(err, "")
         self.failUnlessEqual(out, "")
@@ -301,7 +247,7 @@ class CreateNode(unittest.TestCase):
         if kind in ("client", "node", "introducer"):
             # test that the output (without --quiet) includes the base directory
             n4 = os.path.join(basedir, command + "-n4")
-            argv = [command, n4]
+            argv = [command] + list(args) + [n4]
             rc, out, err = self.run_tahoe(argv)
             self.failUnlessEqual(err, "")
             self.failUnlessIn(" created in ", out)
@@ -335,11 +281,8 @@ class CreateNode(unittest.TestCase):
     def test_introducer(self):
         self.do_create("introducer")
 
-    def test_key_generator(self):
-        self.do_create("key-generator")
-
     def test_stats_gatherer(self):
-        self.do_create("stats-gatherer")
+        self.do_create("stats-gatherer", "--hostname=127.0.0.1")
 
     def test_subcommands(self):
         # no arguments should trigger a command listing, via UsageError
@@ -348,6 +291,44 @@ class CreateNode(unittest.TestCase):
                               [],
                               run_by_human=False)
 
+    def test_stats_gatherer_good_args(self):
+        rc = runner.runner(["create-stats-gatherer", "--hostname=foo",
+                            self.mktemp()])
+        self.assertEqual(rc, 0)
+        rc = runner.runner(["create-stats-gatherer", "--location=tcp:foo:1234",
+                            "--port=tcp:1234", self.mktemp()])
+        self.assertEqual(rc, 0)
+
+    def test_stats_gatherer_bad_args(self):
+        # missing hostname/location/port
+        argv = "create-stats-gatherer D"
+        self.assertRaises(usage.UsageError, runner.runner, argv.split(),
+                          run_by_human=False)
+
+        # missing port
+        argv = "create-stats-gatherer --location=foo D"
+        self.assertRaises(usage.UsageError, runner.runner, argv.split(),
+                          run_by_human=False)
+
+        # missing location
+        argv = "create-stats-gatherer --port=foo D"
+        self.assertRaises(usage.UsageError, runner.runner, argv.split(),
+                          run_by_human=False)
+
+        # can't provide both
+        argv = "create-stats-gatherer --hostname=foo --port=foo D"
+        self.assertRaises(usage.UsageError, runner.runner, argv.split(),
+                          run_by_human=False)
+
+        # can't provide both
+        argv = "create-stats-gatherer --hostname=foo --location=foo D"
+        self.assertRaises(usage.UsageError, runner.runner, argv.split(),
+                          run_by_human=False)
+
+        # can't provide all three
+        argv = "create-stats-gatherer --hostname=foo --location=foo --port=foo D"
+        self.assertRaises(usage.UsageError, runner.runner, argv.split(),
+                          run_by_human=False)
 
 class RunNode(common_util.SignalMixin, unittest.TestCase, pollmixin.PollMixin,
               RunBinTahoeMixin):
@@ -704,84 +685,4 @@ class RunNode(common_util.SignalMixin, unittest.TestCase, pollmixin.PollMixin,
             self.failUnlessEqual(rc_or_sig, 1)
             self.failUnlessIn("does not look like a directory at all", err)
         d.addCallback(_cb3)
-        return d
-
-    def test_keygen(self):
-        self.skip_if_cannot_daemonize()
-
-        basedir = self.workdir("test_keygen")
-        c1 = os.path.join(basedir, "c1")
-        twistd_pid_file = os.path.join(c1, "twistd.pid")
-        keygen_furl_file = os.path.join(c1, "key_generator.furl")
-
-        d = self.run_bintahoe(["--quiet", "create-key-generator", "--basedir", c1])
-        def _cb(res):
-            out, err, rc_or_sig = res
-            self.failUnlessEqual(rc_or_sig, 0)
-        d.addCallback(_cb)
-
-        def _start(res):
-            return self.run_bintahoe(["--quiet", "start", c1])
-        d.addCallback(_start)
-
-        def _cb2(res):
-            out, err, rc_or_sig = res
-            errstr = "rc=%d, OUT: '%s', ERR: '%s'" % (rc_or_sig, out, err)
-            self.failUnlessEqual(rc_or_sig, 0, errstr)
-            self.failUnlessEqual(out, "", errstr)
-            # self.failUnlessEqual(err, "", errstr) # See test_client_no_noise -- for now we ignore noise.
-
-            # the parent (twistd) has exited. However, twistd writes the pid
-            # from the child, not the parent, so we can't expect twistd.pid
-            # to exist quite yet.
-
-            # the node is running, but it might not have made it past the
-            # first reactor turn yet, and if we kill it too early, it won't
-            # remove the twistd.pid file. So wait until it does something
-            # that we know it won't do until after the first turn.
-        d.addCallback(_cb2)
-
-        def _node_has_started():
-            return os.path.exists(keygen_furl_file)
-        d.addCallback(lambda res: self.poll(_node_has_started))
-
-        def _started(res):
-            self.failUnless(os.path.exists(twistd_pid_file))
-            # rm this so we can detect when the second incarnation is ready
-            os.unlink(keygen_furl_file)
-            return self.run_bintahoe(["--quiet", "restart", c1])
-        d.addCallback(_started)
-
-        def _cb3(res):
-            out, err, rc_or_sig = res
-            errstr = "rc=%d, OUT: '%s', ERR: '%s'" % (rc_or_sig, out, err)
-            self.failUnlessEqual(rc_or_sig, 0, errstr)
-            self.failUnlessEqual(out, "", errstr)
-            # self.failUnlessEqual(err, "", errstr) # See test_client_no_noise -- for now we ignore noise.
-        d.addCallback(_cb3)
-
-        # again, the second incarnation of the node might not be ready yet,
-        # so poll until it is
-        d.addCallback(lambda res: self.poll(_node_has_started))
-
-        # now we can kill it. TODO: On a slow machine, the node might kill
-        # itself before we get a chance too, especially if spawning the
-        # 'tahoe stop' command takes a while.
-        def _stop(res):
-            self.failUnless(os.path.exists(twistd_pid_file))
-            return self.run_bintahoe(["--quiet", "stop", c1])
-        d.addCallback(_stop)
-
-        def _cb4(res):
-            out, err, rc_or_sig = res
-            # the parent has exited by now
-            errstr = "rc=%d, OUT: '%s', ERR: '%s'" % (rc_or_sig, out, err)
-            self.failUnlessEqual(rc_or_sig, 0, errstr)
-            self.failUnlessEqual(out, "", errstr)
-            # self.failUnlessEqual(err, "", errstr) # See test_client_no_noise -- for now we ignore noise.
-            # the parent was supposed to poll and wait until it sees
-            # twistd.pid go away before it exits, so twistd.pid should be
-            # gone by now.
-            self.failIf(os.path.exists(twistd_pid_file))
-        d.addCallback(_cb4)
         return d

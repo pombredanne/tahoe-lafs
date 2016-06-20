@@ -1,5 +1,5 @@
 
-import time
+import time, yaml
 from zope.interface import implements
 from twisted.application import service
 from foolscap.api import Referenceable, eventually, RemoteInterface
@@ -12,6 +12,9 @@ from allmydata.introducer.common import sign_to_foolscap, unsign_from_foolscap,\
 from allmydata.util import log
 from allmydata.util.rrefutil import add_version_to_remote_reference
 from allmydata.util.keyutil import BadSignatureError
+
+class InvalidCacheError(Exception):
+    pass
 
 class WrapV2ClientInV1Interface(Referenceable): # for_v1
     """I wrap a v2 IntroducerClient to make it look like a v1 client, so it
@@ -27,9 +30,6 @@ class WrapV2ClientInV1Interface(Referenceable): # for_v1
         anns_v1 = set([convert_announcement_v1_to_v2(ann_v1)
                        for ann_v1 in announcements])
         return self.original.got_announcements(anns_v1, lp)
-
-    def remote_set_encoding_parameters(self, parameters):
-        self.original.remote_set_encoding_parameters(parameters)
 
 class RIStubClient(RemoteInterface): # for_v1
     """Each client publishes a service announcement for a dummy object called
@@ -50,7 +50,7 @@ class IntroducerClient(service.Service, Referenceable):
 
     def __init__(self, tub, introducer_furl,
                  nickname, my_version, oldest_supported,
-                 app_versions, sequencer):
+                 app_versions, sequencer, cache_filepath):
         self._tub = tub
         self.introducer_furl = introducer_furl
 
@@ -60,6 +60,7 @@ class IntroducerClient(service.Service, Referenceable):
         self._oldest_supported = oldest_supported
         self._app_versions = app_versions
         self._sequencer = sequencer
+        self._cache_filepath = cache_filepath
 
         self._my_subscriber_info = { "version": 0,
                                      "nickname": self._nickname,
@@ -89,8 +90,6 @@ class IntroducerClient(service.Service, Referenceable):
         # after startup.
         self._inbound_announcements = {}
 
-        self.encoding_parameters = None
-
         # hooks for unit tests
         self._debug_counts = {
             "inbound_message": 0,
@@ -115,8 +114,45 @@ class IntroducerClient(service.Service, Referenceable):
         def connect_failed(failure):
             self.log("Initial Introducer connection failed: perhaps it's down",
                      level=log.WEIRD, failure=failure, umid="c5MqUQ")
+            self._load_announcements()
         d = self._tub.getReference(self.introducer_furl)
         d.addErrback(connect_failed)
+
+    def _load_announcements(self):
+        # Announcements contain unicode, because they come from JSON. We tell
+        # PyYAML to give us unicode instead of str/bytes.
+        def construct_unicode(loader, node):
+            return node.value
+        yaml.SafeLoader.add_constructor("tag:yaml.org,2002:str",
+                                        construct_unicode)
+        try:
+            with self._cache_filepath.open() as f:
+                servers = yaml.safe_load(f)
+        except EnvironmentError:
+            return # no cache file
+        if not isinstance(servers, list):
+            log.err(InvalidCacheError("not a list"), level=log.WEIRD)
+            return
+        self.log("Using server data from cache", level=log.UNUSUAL)
+        for server_params in servers:
+            if not isinstance(server_params, dict):
+                log.err(InvalidCacheError("not a dict: %r" % (server_params,)),
+                        level=log.WEIRD)
+                continue
+            self._deliver_announcements(server_params['key_s'],
+                                        server_params['ann'])
+
+    def _save_announcements(self):
+        announcements = []
+        for _, value in self._inbound_announcements.items():
+            ann, key_s, time_stamp = value
+            server_params = {
+                "ann" : ann,
+                "key_s" : key_s,
+                }
+            announcements.append(server_params)
+        announcement_cache_yaml = yaml.safe_dump(announcements)
+        self._cache_filepath.setContent(announcement_cache_yaml)
 
     def _got_introducer(self, publisher):
         self.log("connected to introducer, getting versions")
@@ -348,14 +384,16 @@ class IntroducerClient(service.Service, Referenceable):
                      parent=lp2, level=log.NOISY)
 
         self._inbound_announcements[index] = (ann, key_s, time.time())
+        self._save_announcements()
         # note: we never forget an index, but we might update its value
 
+        self._deliver_announcements(key_s, ann)
+
+    def _deliver_announcements(self, key_s, ann):
+        service_name = str(ann["service-name"])
         for (service_name2,cb,args,kwargs) in self._local_subscribers:
             if service_name2 == service_name:
                 eventually(cb, key_s, ann, *args, **kwargs)
-
-    def remote_set_encoding_parameters(self, parameters):
-        self.encoding_parameters = parameters
 
     def connected_to_introducer(self):
         return bool(self._publisher)
